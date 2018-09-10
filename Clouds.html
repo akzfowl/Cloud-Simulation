@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>Clouds</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<style type="text/css">
+
+			body {
+				background-color: #326696;
+				margin: 0px;
+				overflow: hidden;
+				font-family:Monospace;
+				font-size:13px;
+				text-align:center;
+				font-weight: bold;
+				text-align:center;
+			}
+
+			a {
+				color:#0078ff;
+			}
+
+			.bgimg {
+				background-image: : url('night.png');
+			}
+
+		</style>
+	</head>
+	<body>
+		<!--Import required libraries. Threejs for the rendering and managing meshes and materials plus orbitcontrols for camera motion.-->
+		<script src="js/three.js"></script>
+		<script src="js/OrbitControls.js"></script>
+
+		<!--The vertex shader code. Just transforms the matrix values as required.-->
+		<script id="vs" type="x-shader/x-vertex">
+
+			varying vec2 vUv;
+
+			void main() {
+
+				vUv = uv;
+				gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+
+			}
+		</script>
+
+		<!--The frgament shader code. This produces most of the effects. It uses the depth of the scene to produce the
+		    interesting looking cloudy effects. There is also a 'fogfactor' which adds to the visuals.
+		    Basically, the distance from the camera, determines the look of the texture at the pixel coordinate.
+		    This produces the really nice effect of appearing almost refractive.-->
+		<script id="fs" type="x-shader/x-fragment">
+
+			uniform sampler2D map;
+
+			uniform vec3 fogColor;
+			uniform float fogNear;
+			uniform float fogFar;
+
+			varying vec2 vUv;
+
+			void main() {
+
+				float depth = gl_FragCoord.z / gl_FragCoord.w;
+				float fogFactor = smoothstep( fogNear, fogFar, depth );
+
+				gl_FragColor = texture2D( map, vUv );
+				gl_FragColor.w *= pow( gl_FragCoord.z, 50.0 );
+				gl_FragColor = mix( gl_FragColor, vec4( fogColor, gl_FragColor.w ), fogFactor );
+
+			}
+
+		</script>
+
+		<!--This is the 'main' program that creates the scene and allows for movement through it.-->
+		<script type="text/javascript">
+
+			//This is the DOM element which will hold the canvas element within it.
+			var container;
+
+			//Declare some of the required elements for creating and managing a scene in three.js
+			var camera, scene, renderer, controls;
+			var mesh, geometry, material;
+
+			//Initialize the mouse coordinates.
+			var mouseX = 0, mouseY = 0;
+
+			//Initialize the timer.
+			var start_time = Date.now();
+
+			//Calculate values using the width and height of the window. These can be used to make it relative to screen size.
+			var windowHalfX = window.innerWidth / 2;
+			var windowHalfY = window.innerHeight / 2;
+
+			//Call the initializer.
+			init();
+
+			//This function initializes all the required portions of a threejs scene and sets up the textures and shader materials to produce the effects.
+			function init() {
+
+				//Create the container element.
+				container = document.createElement( 'div' );
+
+				//Append it to the DOM.
+				document.body.appendChild( container );
+
+				//Create the canvas element and set some properties.
+				var canvas = document.createElement( 'canvas' );
+				canvas.width = 32;
+				canvas.height = window.innerHeight;
+
+				//Retrieve a reference to the canvas that can then be used throughout.
+				var context = canvas.getContext( '2d' );
+
+				//Create a gradient based on two pre-selected colours to give a good background to the scene.
+				var gradient = context.createLinearGradient( 0, 0, 0, canvas.height );
+				gradient.addColorStop(0, "#1e4877");
+				gradient.addColorStop(0.5, "#4584b4");
+
+				//Apply this gradient to the scene based on the dimensions of the canvas.
+				context.fillStyle = gradient;
+				context.fillRect(0, 0, canvas.width, canvas.height);
+				container.style.background = 'url(' + canvas.toDataURL('img/png') + ')';
+				container.style.backgroundSize = '32px 100%';
+
+				//Initialize the canvas using the three.js perspective camera and required dimensions.
+				camera = new THREE.PerspectiveCamera( 30, window.innerWidth / window.innerHeight, 1, 3000 );
+
+				//Set camera position in the scene.
+				camera.position.z = 6000;
+				camera.position.y = 60;
+
+				//Add controls to the scene.
+				controls = new THREE.OrbitControls(camera);
+				controls.minDistance = 100;
+				controls.maxDistance = 10000;
+
+				//Create the scene itself.
+				scene = new THREE.Scene();
+
+				//Create a simple geometry.
+				geometry = new THREE.Geometry();
+
+				//Load in the required storm cloud texture and set up mipmaps.
+				var texture = THREE.ImageUtils.loadTexture( 'StormCloud1.png', null, animate );
+
+				//Just comment out the above line and uncomment one of the ones below to see different kinds of clouds.
+				//var texture = THREE.ImageUtils.loadTexture( 'Cloud-particle.png', null, animate );
+				//var texture = THREE.ImageUtils.loadTexture( 'Cloud10.png', null, animate );
+				//var texture = THREE.ImageUtils.loadTexture( 'StormCloud2.png', null, animate );
+
+				texture.magFilter = THREE.LinearMipMapLinearFilter;
+				texture.minFilter = THREE.LinearMipMapLinearFilter;
+
+				//Add fog to the scene.
+				var fog = new THREE.Fog( 0x4584b4, - 100, 3000 );
+
+				//Initialize the material to be used for the textures.
+				//Use the already created vertex and fragment shaders as part of the material.
+				material = new THREE.ShaderMaterial( {
+
+					uniforms: {
+
+						"map": { type: "t", value: texture },
+						"fogColor" : { type: "c", value: fog.color },
+						"fogNear" : { type: "f", value: fog.near },
+						"fogFar" : { type: "f", value: fog.far },
+
+					},
+					vertexShader: document.getElementById( 'vs' ).textContent,
+					fragmentShader: document.getElementById( 'fs' ).textContent,
+					depthWrite: false,
+					depthTest: false,
+					transparent: true
+
+				} );
+
+				//Declare a plane to be used to scroll through and create the clouds on.
+				var plane = new THREE.Mesh( new THREE.PlaneGeometry( 150, 150 ) );
+
+				//Iteratively create a geometry on the plane on top of which the clouds can then be placed.
+				for ( var i = 0; i < 8000; i++ ) {
+
+					plane.position.x = Math.random() * 1000 - 500;
+					plane.position.y = - Math.random() * Math.random() * 200 - 15;
+					plane.position.z = i;
+					plane.rotation.z = Math.random() * Math.PI;
+					plane.scale.x = plane.scale.y = Math.random() * Math.random() * 1.5 + 0.5;
+
+					THREE.GeometryUtils.merge( geometry, plane );
+
+				}
+
+				//Create the meshes to be used by combinging the geometry and the material.
+				mesh = new THREE.Mesh( geometry, material );
+
+				//Add to the scene.
+				scene.add( mesh );
+
+				//Thicken by adding more.
+				mesh = new THREE.Mesh( geometry, material );
+
+				//Position the meshes.
+				mesh.position.z = - 8000;
+
+				//Add to the scene.
+				scene.add( mesh );
+
+				//Set the renderer with the required dimensions.
+				renderer = new THREE.WebGLRenderer( { antialias: false } );
+				renderer.setSize( window.innerWidth, window.innerHeight );
+
+				//Add it to the DOM.
+				container.appendChild( renderer.domElement );
+
+				//Add listeners for mouse and window events.
+				document.addEventListener( 'mousemove', onDocumentMouseMove, false );
+				window.addEventListener( 'resize', onWindowResize, false );
+
+			}
+
+			//This function helps to move the camera according to mouse movements.
+			function onDocumentMouseMove( event ) {
+
+				mouseX = ( event.clientX - windowHalfX ) * 0.25;
+				mouseY = ( event.clientY - windowHalfY ) * 0.15;
+
+			}
+
+			//This function helps to adjust the window elements in case the window is resized. 
+			function onWindowResize( event ) {
+
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+
+				renderer.setSize( window.innerWidth, window.innerHeight );
+			}
+
+			//This function performs the animation through the scene.
+			function animate() {
+
+				requestAnimationFrame( animate );
+
+				position = ( ( Date.now() - start_time ) * 0.03 ) % 8000;
+
+				//These lines can be uncommented if we want the camera to respond to mouse movements.
+				//camera.position.x += ( mouseX - camera.position.x ) * 0.01;
+				//camera.position.y += ( - mouseY - camera.position.y ) * 0.01;
+
+				//This causes the movement into the scene.
+				camera.position.z = - position + 8000;
+
+				//Renders each frame of the scene.
+				renderer.render( scene, camera );
+
+			}
+		</script>
+		<div class="bgimg">
+			<canvas width="1920" height="200" style="width: 1536; height: 150px;"></canvas>
+		</div>
+	</body>
+</html>
